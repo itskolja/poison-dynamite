@@ -108,6 +108,7 @@ public class PoisonDynamitePlugin extends Plugin
 		overlayManager.remove(overlay);
 		removeInfobox();
 		resetState();
+		npcFailCounts.clear();
 	}
 
 	@Subscribe
@@ -134,7 +135,7 @@ public class PoisonDynamitePlugin extends Plugin
 		// Warn if NPC is flagged as immune
 		if (config.warnImmunity() && immuneNpcIds.contains(npc.getId()))
 		{
-			String name = npc.getName() != null ? npc.getName() : "NPC";
+			String name = npc.getName() != null ? npc.getName() : "NPC " + npc.getId();
 			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 				"Warning: " + name + " may be immune to poison.", null);
 		}
