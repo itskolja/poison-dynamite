@@ -1,4 +1,4 @@
-package net.runelite.client.plugins.poisondynamite;
+package com.runelite.poisondynamite;
 
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
@@ -33,7 +33,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.ui.overlay.infobox.InfoBoxManager;
 
 @PluginDescriptor(
-	name = "Poison Dynamite Timer",
+	name = "Poison Dynamite",
 	description = "Tracks Dynamite(p) poison proc chance, countdown, and success rate",
 	tags = {"poison", "dynamite", "timer", "skiller", "combat"}
 )

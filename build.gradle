@@ -13,7 +13,7 @@ repositories {
 }
 
 def runeLiteVersion = 'latest.release'
-def pluginMainClass = 'net.runelite.client.plugins.poisondynamite.PoisonDynamitePluginTest'
+def pluginMainClass = 'com.runelite.poisondynamite.PoisonDynamitePluginTest'
 
 dependencies {
 	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
@@ -26,7 +26,7 @@ dependencies {
 	testImplementation group: 'net.runelite', name:'jshell', version: runeLiteVersion
 }
 
-group = 'net.runelite.client.plugins'
+group = 'com.runelite.poisondynamite'
 version = '1.0-SNAPSHOT'
 
 tasks.withType(JavaCompile).configureEach {

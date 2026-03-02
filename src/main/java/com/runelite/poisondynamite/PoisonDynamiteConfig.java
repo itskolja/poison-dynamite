@@ -1,4 +1,4 @@
-package net.runelite.client.plugins.poisondynamite;
+package com.runelite.poisondynamite;
 
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;

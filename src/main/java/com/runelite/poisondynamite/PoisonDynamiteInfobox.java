@@ -1,4 +1,4 @@
-package net.runelite.client.plugins.poisondynamite;
+package com.runelite.poisondynamite;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
