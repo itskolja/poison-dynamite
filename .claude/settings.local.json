@@ -22,7 +22,8 @@
       "Bash(python:*)",
       "Bash(node:*)",
       "Bash(gh pr:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(identify:*)"
     ]
   }
 }
