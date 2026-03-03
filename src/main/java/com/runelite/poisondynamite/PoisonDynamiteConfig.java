@@ -8,7 +8,6 @@ import net.runelite.client.config.ConfigItem;
 public interface PoisonDynamiteConfig extends Config
 {
 	String GROUP = "poisondynamite";
-	String IMMUNE_NPCS_KEY = "immuneNpcs";
 	String TRACKED_NPCS_KEY = "trackedNpcs";
 
 	@ConfigItem(
@@ -22,26 +21,7 @@ public interface PoisonDynamiteConfig extends Config
 		return true;
 	}
 
-	@ConfigItem(
-		keyName = IMMUNE_NPCS_KEY,
-		name = "Immune NPCs",
-		description = "Auto-managed immune NPC list.",
-		hidden = true
-	)
-	default String immuneNpcs()
-	{
-		return "";
-	}
-
-	@ConfigItem(
-		keyName = IMMUNE_NPCS_KEY,
-		name = "",
-		description = "",
-		hidden = true
-	)
-	void setImmuneNpcs(String npcs);
-
-	@ConfigItem(
+@ConfigItem(
 		keyName = TRACKED_NPCS_KEY,
 		name = "Tracked NPC IDs",
 		description = "Auto-managed tracked NPC list.",

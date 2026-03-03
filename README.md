@@ -1,21 +1,20 @@
 # Poison Dynamite
 
-A RuneLite plugin that tracks Dynamite(p) poison procs, countdown timers, success rates, and NPC immunity.
+A RuneLite plugin for tracking Dynamite(p) usage with hit chance calculations and poison proc timers.
+
+## Demo
+
+[![Demo video](https://img.youtube.com/vi/IR9TIbziBSA/0.jpg)](https://youtu.be/IR9TIbziBSA)
 
 ## Features
 
-- **Countdown infobox** — shows time remaining for poison to proc after detonation, with color-coded status (green = success, red = fail, orange = warning)
-- **Session stats overlay** — displays success rate and total poison damage dealt
-- **Failure notifications** — alerts you when poison fails to proc
-- **Immunity learning** — automatically flags NPCs as immune after repeated failures and warns you before targeting them again
+- **Hit chance overlay** — calculates hit chance and poison probability based on your stats, equipment, and the NPC's defence
+- **Countdown timer** — ring overlay above the tracked NPC showing time remaining for poison to proc, with result indicators (OK / MISS / X)
+- **NPC tracking** — shift-right-click NPCs to track or hide them; tracked NPCs persist across sessions
+- **Max hit display** — shows your max hit based on Firemaking level
 
 ## Configuration
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Show infobox timer | Countdown infobox after detonation | On |
-| Notify on failure | Notification when poison fails to proc | On |
-| Show stats overlay | Session success rate and damage overlay | On |
-| Track poison damage | Track cumulative poison damage | On |
-| Warn if NPC immune | Chat warning when targeting immune NPCs | On |
-| Immune NPCs | Learned immune NPC IDs (clear to reset) | — |
+| Show NPC overlay | Countdown ring above the tracked NPC | On |

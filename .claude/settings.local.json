@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:oldschool.runescape.wiki)",
+      "WebFetch(domain:static.runelite.net)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:runelite.phyce.dev)",
+      "Bash(./gradlew compileJava:*)",
+      "Bash(JAVA_HOME=\"C:/Program Files/Eclipse Adoptium/jdk-11.0.30.7-hotspot\" ./gradlew compileJava:*)",
+      "Bash(JAVA_HOME=\"C:/Program Files/Eclipse Adoptium/jdk-11.0.30.7-hotspot\" ./gradlew run:*)",
+      "Bash(winget install:*)",
+      "Bash(export:*)",
+      "Bash(JAVA_HOME=\"/c/Program Files/Eclipse Adoptium/jdk-11.0.30.7-hotspot\" ./gradlew run:*)",
+      "Bash(\"$JAVA_HOME/bin/jar\" tf:*)",
+      "Bash(\"/c/Program Files/Eclipse Adoptium/jdk-11.0.30.7-hotspot/bin/jar.exe\" tf:*)",
+      "Bash(JAVA_HOME=\"/c/Program Files/Eclipse Adoptium/jdk-11.0.30.7-hotspot\" ./gradlew build:*)",
+      "Bash(unzip:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(node:*)",
+      "Bash(gh pr:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}

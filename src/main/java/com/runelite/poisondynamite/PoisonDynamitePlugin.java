@@ -4,15 +4,12 @@ import com.google.inject.Provides;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.HitsplatID;
@@ -50,7 +47,6 @@ public class PoisonDynamitePlugin extends Plugin
 	private static final int GAME_TICK_MILLIS = 600;
 	private static final int POISON_CYCLE_TICKS = 30;
 	static final int POISON_TICK_MILLIS = POISON_CYCLE_TICKS * GAME_TICK_MILLIS;
-	private static final int IMMUNITY_THRESHOLD = 8;
 	private static final int RESULT_DISPLAY_MILLIS = 3000;
 
 	enum State
@@ -109,8 +105,6 @@ public class PoisonDynamitePlugin extends Plugin
 
 	private boolean awaitingDetonationHit;
 
-	private final Map<Integer, Integer> npcFailCounts = new HashMap<>();
-	private Set<Integer> immuneNpcIds = new HashSet<>();
 	private Set<Integer> trackedNpcIds = new HashSet<>();
 
 	@Provides
@@ -124,7 +118,6 @@ public class PoisonDynamitePlugin extends Plugin
 	{
 		overlayManager.add(overlay);
 		overlayManager.add(npcOverlay);
-		loadImmuneNpcs();
 		loadTrackedNpcs();
 	}
 
@@ -134,7 +127,6 @@ public class PoisonDynamitePlugin extends Plugin
 		overlayManager.remove(overlay);
 		overlayManager.remove(npcOverlay);
 		clearTrackedNpc();
-		npcFailCounts.clear();
 	}
 
 	@Subscribe
@@ -185,13 +177,6 @@ public class PoisonDynamitePlugin extends Plugin
 			return;
 		}
 
-		if (immuneNpcIds.contains(npc.getId()))
-		{
-			String name = npc.getName() != null ? npc.getName() : "NPC " + npc.getId();
-			client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-				"Warning: " + name + " may be immune to poison.", null);
-		}
-
 		trackNpc(npc);
 		resultTime = null;
 		poisonSuccess = false;
@@ -221,7 +206,6 @@ public class PoisonDynamitePlugin extends Plugin
 			poisonSuccess = true;
 			awaitingDetonationHit = false;
 			resultTime = Instant.now();
-			npcFailCounts.remove(trackedNpcId);
 			return;
 		}
 
@@ -268,21 +252,6 @@ public class PoisonDynamitePlugin extends Plugin
 			log.debug("Poison timer expired on {}", trackedNpcName);
 			poisonFailed = true;
 			resultTime = Instant.now();
-
-			if (trackedNpcId != -1)
-			{
-				int fails = npcFailCounts.merge(trackedNpcId, 1, Integer::sum);
-				if (fails >= IMMUNITY_THRESHOLD && !immuneNpcIds.contains(trackedNpcId))
-				{
-					immuneNpcIds.add(trackedNpcId);
-					saveImmuneNpcs();
-					npcFailCounts.remove(trackedNpcId);
-					String name = trackedNpcName != null ? trackedNpcName : "NPC " + trackedNpcId;
-					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-						name + " flagged as likely immune to poison ("
-							+ fails + " consecutive failures).", null);
-				}
-			}
 		}
 	}
 
@@ -513,16 +482,6 @@ public class PoisonDynamitePlugin extends Plugin
 	private void saveTrackedNpcs()
 	{
 		config.setTrackedNpcs(serializeNpcIdSet(trackedNpcIds));
-	}
-
-	private void loadImmuneNpcs()
-	{
-		immuneNpcIds = parseNpcIdSet(config.immuneNpcs());
-	}
-
-	private void saveImmuneNpcs()
-	{
-		config.setImmuneNpcs(serializeNpcIdSet(immuneNpcIds));
 	}
 
 	private Set<Integer> parseNpcIdSet(String saved)
