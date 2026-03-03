@@ -151,26 +151,17 @@ public class PoisonDynamitePlugin extends Plugin
 		if (menuEntry.getType() == MenuAction.EXAMINE_NPC
 			&& client.isKeyPressed(KeyCode.KC_SHIFT))
 		{
-			if (trackedNpcIds.contains(npc.getId()))
-			{
-				client.createMenuEntry(-1)
-					.setOption("Hide from Poison Dynamite")
-					.setTarget(menuEntry.getTarget())
-					.setType(MenuAction.RUNELITE)
-					.setWorldViewId(menuEntry.getWorldViewId())
-					.setIdentifier(npc.getIndex())
-					.onClick(this::onTrackMenuClicked);
-			}
-			else
-			{
-				client.createMenuEntry(-1)
-					.setOption("Track with Poison Dynamite")
-					.setTarget(menuEntry.getTarget())
-					.setType(MenuAction.RUNELITE)
-					.setWorldViewId(menuEntry.getWorldViewId())
-					.setIdentifier(npc.getIndex())
-					.onClick(this::onTrackMenuClicked);
-			}
+			String option = trackedNpcIds.contains(npc.getId())
+				? "Hide from Poison Dynamite"
+				: "Track with Poison Dynamite";
+
+			client.createMenuEntry(-1)
+				.setOption(option)
+				.setTarget(menuEntry.getTarget())
+				.setType(MenuAction.RUNELITE)
+				.setWorldViewId(menuEntry.getWorldViewId())
+				.setIdentifier(npc.getIndex())
+				.onClick(this::onTrackMenuClicked);
 		}
 	}
 
@@ -220,8 +211,9 @@ public class PoisonDynamitePlugin extends Plugin
 			return;
 		}
 
-		int type = event.getHitsplat().getHitsplatType();
-		int amount = event.getHitsplat().getAmount();
+		var hitsplat = event.getHitsplat();
+		int type = hitsplat.getHitsplatType();
+		int amount = hitsplat.getAmount();
 
 		if (type == HitsplatID.POISON && !poisonSuccess && !poisonFailed)
 		{
@@ -284,6 +276,7 @@ public class PoisonDynamitePlugin extends Plugin
 				{
 					immuneNpcIds.add(trackedNpcId);
 					saveImmuneNpcs();
+					npcFailCounts.remove(trackedNpcId);
 					String name = trackedNpcName != null ? trackedNpcName : "NPC " + trackedNpcId;
 					client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
 						name + " flagged as likely immune to poison ("
@@ -298,8 +291,10 @@ public class PoisonDynamitePlugin extends Plugin
 		trackedNpc = npc;
 		trackedNpcName = npc.getName() != null ? npc.getName() : "Unknown";
 		trackedNpcId = npc.getId();
-		trackedNpcIds.add(trackedNpcId);
-		saveTrackedNpcs();
+		if (trackedNpcIds.add(trackedNpcId))
+		{
+			saveTrackedNpcs();
+		}
 		npcStatsManager.getStats(trackedNpcName, trackedNpcId);
 	}
 
@@ -512,59 +507,49 @@ public class PoisonDynamitePlugin extends Plugin
 
 	private void loadTrackedNpcs()
 	{
-		trackedNpcIds.clear();
-		String saved = config.trackedNpcs();
-		if (saved != null && !saved.isEmpty())
-		{
-			try
-			{
-				trackedNpcIds = Arrays.stream(saved.split(","))
-					.map(String::trim)
-					.filter(s -> !s.isEmpty())
-					.map(Integer::parseInt)
-					.collect(Collectors.toCollection(HashSet::new));
-			}
-			catch (NumberFormatException e)
-			{
-				log.warn("Failed to parse tracked NPC IDs: {}", saved, e);
-			}
-		}
+		trackedNpcIds = parseNpcIdSet(config.trackedNpcs());
 	}
 
 	private void saveTrackedNpcs()
 	{
-		String value = trackedNpcIds.stream()
-			.map(String::valueOf)
-			.collect(Collectors.joining(","));
-		config.setTrackedNpcs(value);
+		config.setTrackedNpcs(serializeNpcIdSet(trackedNpcIds));
 	}
 
 	private void loadImmuneNpcs()
 	{
-		immuneNpcIds.clear();
-		String saved = config.immuneNpcs();
-		if (saved != null && !saved.isEmpty())
-		{
-			try
-			{
-				immuneNpcIds = Arrays.stream(saved.split(","))
-					.map(String::trim)
-					.filter(s -> !s.isEmpty())
-					.map(Integer::parseInt)
-					.collect(Collectors.toCollection(HashSet::new));
-			}
-			catch (NumberFormatException e)
-			{
-				log.warn("Failed to parse immune NPC IDs: {}", saved, e);
-			}
-		}
+		immuneNpcIds = parseNpcIdSet(config.immuneNpcs());
 	}
 
 	private void saveImmuneNpcs()
 	{
-		String value = immuneNpcIds.stream()
+		config.setImmuneNpcs(serializeNpcIdSet(immuneNpcIds));
+	}
+
+	private Set<Integer> parseNpcIdSet(String saved)
+	{
+		if (saved == null || saved.isEmpty())
+		{
+			return new HashSet<>();
+		}
+		try
+		{
+			return Arrays.stream(saved.split(","))
+				.map(String::trim)
+				.filter(s -> !s.isEmpty())
+				.map(Integer::parseInt)
+				.collect(Collectors.toCollection(HashSet::new));
+		}
+		catch (NumberFormatException e)
+		{
+			log.warn("Failed to parse NPC IDs: {}", saved, e);
+			return new HashSet<>();
+		}
+	}
+
+	private static String serializeNpcIdSet(Set<Integer> ids)
+	{
+		return ids.stream()
 			.map(String::valueOf)
 			.collect(Collectors.joining(","));
-		config.setImmuneNpcs(value);
 	}
 }

@@ -44,8 +44,8 @@ public interface PoisonDynamiteConfig extends Config
 	@ConfigItem(
 		keyName = TRACKED_NPCS_KEY,
 		name = "Tracked NPC IDs",
-		description = "Comma-separated NPC IDs to track with Poison Dynamite.",
-		position = 2
+		description = "Auto-managed tracked NPC list.",
+		hidden = true
 	)
 	default String trackedNpcs()
 	{
@@ -55,7 +55,8 @@ public interface PoisonDynamiteConfig extends Config
 	@ConfigItem(
 		keyName = TRACKED_NPCS_KEY,
 		name = "",
-		description = ""
+		description = "",
+		hidden = true
 	)
 	void setTrackedNpcs(String npcs);
 }
