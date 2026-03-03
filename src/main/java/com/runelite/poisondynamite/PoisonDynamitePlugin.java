@@ -16,13 +16,14 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.HitsplatID;
-import net.runelite.api.Hitsplat;
 import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.KeyCode;
 import net.runelite.api.MenuAction;
+import net.runelite.api.MenuEntry;
 import net.runelite.api.NPC;
+import net.runelite.api.WorldView;
 import net.runelite.api.Skill;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
@@ -46,14 +47,15 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class PoisonDynamitePlugin extends Plugin
 {
-	static final int POISON_TICK_MILLIS = 18200;
+	private static final int GAME_TICK_MILLIS = 600;
+	private static final int POISON_CYCLE_TICKS = 30;
+	static final int POISON_TICK_MILLIS = POISON_CYCLE_TICKS * GAME_TICK_MILLIS;
 	private static final int IMMUNITY_THRESHOLD = 8;
 	private static final int RESULT_DISPLAY_MILLIS = 3000;
 
 	enum State
 	{
 		IDLE,
-		AWAITING_DETONATION,
 		AWAITING_POISON
 	}
 
@@ -102,8 +104,14 @@ public class PoisonDynamitePlugin extends Plugin
 	@Getter
 	private boolean poisonFailed;
 
+	@Getter
+	private boolean detonationMiss;
+
+	private boolean awaitingDetonationHit;
+
 	private final Map<Integer, Integer> npcFailCounts = new HashMap<>();
 	private Set<Integer> immuneNpcIds = new HashSet<>();
+	private Set<Integer> trackedNpcIds = new HashSet<>();
 
 	@Provides
 	PoisonDynamiteConfig getConfig(ConfigManager configManager)
@@ -117,6 +125,7 @@ public class PoisonDynamitePlugin extends Plugin
 		overlayManager.add(overlay);
 		overlayManager.add(npcOverlay);
 		loadImmuneNpcs();
+		loadTrackedNpcs();
 	}
 
 	@Override
@@ -142,12 +151,26 @@ public class PoisonDynamitePlugin extends Plugin
 		if (menuEntry.getType() == MenuAction.EXAMINE_NPC
 			&& client.isKeyPressed(KeyCode.KC_SHIFT))
 		{
-			client.createMenuEntry(-1)
-				.setOption("Track with Poison Dynamite")
-				.setTarget(menuEntry.getTarget())
-				.setType(MenuAction.RUNELITE)
-				.setIdentifier(npc.getIndex())
-				.onClick(e -> trackNpc(npc));
+			if (trackedNpcIds.contains(npc.getId()))
+			{
+				client.createMenuEntry(-1)
+					.setOption("Hide from Poison Dynamite")
+					.setTarget(menuEntry.getTarget())
+					.setType(MenuAction.RUNELITE)
+					.setWorldViewId(menuEntry.getWorldViewId())
+					.setIdentifier(npc.getIndex())
+					.onClick(this::onTrackMenuClicked);
+			}
+			else
+			{
+				client.createMenuEntry(-1)
+					.setOption("Track with Poison Dynamite")
+					.setTarget(menuEntry.getTarget())
+					.setType(MenuAction.RUNELITE)
+					.setWorldViewId(menuEntry.getWorldViewId())
+					.setIdentifier(npc.getIndex())
+					.onClick(this::onTrackMenuClicked);
+			}
 		}
 	}
 
@@ -179,45 +202,52 @@ public class PoisonDynamitePlugin extends Plugin
 		}
 
 		trackNpc(npc);
-		countdownStart = null;
 		resultTime = null;
 		poisonSuccess = false;
 		poisonFailed = false;
-		state = State.AWAITING_DETONATION;
-		log.debug("Dynamite(p) used on NPC: {} (id={})", npc.getName(), npc.getId());
+		detonationMiss = false;
+		awaitingDetonationHit = true;
+		countdownStart = null;
+		state = State.AWAITING_POISON;
+		log.debug("Dynamite(p) used on NPC: {} (id={}), awaiting detonation hit", npc.getName(), npc.getId());
 	}
 
 	@Subscribe
 	public void onHitsplatApplied(HitsplatApplied event)
 	{
-		if (trackedNpc == null || event.getActor() != trackedNpc)
+		if (state != State.AWAITING_POISON || trackedNpc == null || event.getActor() != trackedNpc)
 		{
 			return;
 		}
 
-		Hitsplat hitsplat = event.getHitsplat();
-		int type = hitsplat.getHitsplatType();
+		int type = event.getHitsplat().getHitsplatType();
+		int amount = event.getHitsplat().getAmount();
 
-		switch (state)
+		if (type == HitsplatID.POISON && !poisonSuccess && !poisonFailed)
 		{
-			case AWAITING_DETONATION:
-				if (hitsplat.isMine() && hitsplat.getAmount() > 0)
-				{
-					log.debug("Detonation on {}, starting poison countdown", trackedNpcName);
-					state = State.AWAITING_POISON;
-					countdownStart = Instant.now();
-				}
-				break;
+			log.debug("Poison proc on {}! Damage: {}", trackedNpcName, amount);
+			poisonSuccess = true;
+			awaitingDetonationHit = false;
+			resultTime = Instant.now();
+			npcFailCounts.remove(trackedNpcId);
+			return;
+		}
 
-			case AWAITING_POISON:
-				if (type == HitsplatID.POISON && !poisonSuccess && !poisonFailed)
-				{
-					log.debug("Poison proc on {}! Damage: {}", trackedNpcName, hitsplat.getAmount());
-					poisonSuccess = true;
-					resultTime = Instant.now();
-					npcFailCounts.remove(trackedNpcId);
-				}
-				break;
+		if (awaitingDetonationHit && type != HitsplatID.POISON)
+		{
+			awaitingDetonationHit = false;
+			if (amount <= 0)
+			{
+				log.debug("Dynamite missed on {} (hit 0)", trackedNpcName);
+				detonationMiss = true;
+				poisonFailed = true;
+				resultTime = Instant.now();
+			}
+			else
+			{
+				countdownStart = Instant.now();
+				log.debug("Dynamite hit on {} for {}, countdown started", trackedNpcName, amount);
+			}
 		}
 	}
 
@@ -268,6 +298,8 @@ public class PoisonDynamitePlugin extends Plugin
 		trackedNpc = npc;
 		trackedNpcName = npc.getName() != null ? npc.getName() : "Unknown";
 		trackedNpcId = npc.getId();
+		trackedNpcIds.add(trackedNpcId);
+		saveTrackedNpcs();
 		npcStatsManager.getStats(trackedNpcName, trackedNpcId);
 	}
 
@@ -281,6 +313,8 @@ public class PoisonDynamitePlugin extends Plugin
 		resultTime = null;
 		poisonSuccess = false;
 		poisonFailed = false;
+		detonationMiss = false;
+		awaitingDetonationHit = false;
 	}
 
 	long getRemainingMillis()
@@ -438,6 +472,71 @@ public class PoisonDynamitePlugin extends Plugin
 	NpcStatsManager getNpcStatsManager()
 	{
 		return npcStatsManager;
+	}
+
+	private void onTrackMenuClicked(MenuEntry entry)
+	{
+		WorldView wv = client.getWorldView(entry.getWorldViewId());
+		if (wv == null)
+		{
+			return;
+		}
+
+		NPC npc = wv.npcs().byIndex(entry.getIdentifier());
+		if (npc == null)
+		{
+			return;
+		}
+
+		if (trackedNpcIds.contains(npc.getId()))
+		{
+			untrackNpc(npc);
+		}
+		else
+		{
+			trackNpc(npc);
+		}
+	}
+
+	private void untrackNpc(NPC npc)
+	{
+		int id = npc.getId();
+		trackedNpcIds.remove(id);
+		saveTrackedNpcs();
+		if (trackedNpcId == id)
+		{
+			clearTrackedNpc();
+		}
+		log.debug("Untracked NPC: {} (id={})", npc.getName(), id);
+	}
+
+	private void loadTrackedNpcs()
+	{
+		trackedNpcIds.clear();
+		String saved = config.trackedNpcs();
+		if (saved != null && !saved.isEmpty())
+		{
+			try
+			{
+				trackedNpcIds = Arrays.stream(saved.split(","))
+					.map(String::trim)
+					.filter(s -> !s.isEmpty())
+					.map(Integer::parseInt)
+					.collect(Collectors.toCollection(HashSet::new));
+			}
+			catch (NumberFormatException e)
+			{
+				log.warn("Failed to parse tracked NPC IDs: {}", saved, e);
+			}
+		}
+	}
+
+	private void saveTrackedNpcs()
+	{
+		String value = trackedNpcIds.stream()
+			.map(String::valueOf)
+			.collect(Collectors.joining(","));
+		config.setTrackedNpcs(value);
 	}
 
 	private void loadImmuneNpcs()

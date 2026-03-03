@@ -9,6 +9,7 @@ public interface PoisonDynamiteConfig extends Config
 {
 	String GROUP = "poisondynamite";
 	String IMMUNE_NPCS_KEY = "immuneNpcs";
+	String TRACKED_NPCS_KEY = "trackedNpcs";
 
 	@ConfigItem(
 		keyName = "showNpcOverlay",
@@ -39,4 +40,22 @@ public interface PoisonDynamiteConfig extends Config
 		hidden = true
 	)
 	void setImmuneNpcs(String npcs);
+
+	@ConfigItem(
+		keyName = TRACKED_NPCS_KEY,
+		name = "Tracked NPC IDs",
+		description = "Comma-separated NPC IDs to track with Poison Dynamite.",
+		position = 2
+	)
+	default String trackedNpcs()
+	{
+		return "";
+	}
+
+	@ConfigItem(
+		keyName = TRACKED_NPCS_KEY,
+		name = "",
+		description = ""
+	)
+	void setTrackedNpcs(String npcs);
 }

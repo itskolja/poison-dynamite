@@ -104,11 +104,6 @@ class PoisonDynamiteOverlay extends OverlayPanel
 				.left("Max hit:")
 				.right(String.valueOf(maxHit))
 				.build());
-
-			panelComponent.getChildren().add(LineComponent.builder()
-				.left("FM level:")
-				.right(String.valueOf(fmLevel))
-				.build());
 		}
 
 		return super.render(graphics);

@@ -123,6 +123,10 @@ class PoisonDynamiteNpcOverlay extends Overlay
 		{
 			return "OK";
 		}
+		if (plugin.isDetonationMiss())
+		{
+			return "MISS";
+		}
 		if (plugin.isPoisonFailed())
 		{
 			return "X";
