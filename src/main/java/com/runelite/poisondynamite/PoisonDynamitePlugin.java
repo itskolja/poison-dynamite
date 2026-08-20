@@ -4,34 +4,35 @@ import com.google.inject.Provides;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
-import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.HitsplatID;
 import net.runelite.api.InventoryID;
-import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.KeyCode;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.NPC;
-import net.runelite.api.WorldView;
 import net.runelite.api.Skill;
+import net.runelite.api.WorldView;
+import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.events.NpcDespawned;
 import net.runelite.api.gameval.ItemID;
+import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
-import net.runelite.client.game.ItemEquipmentStats;
-import net.runelite.client.game.ItemManager;
-import net.runelite.client.game.ItemStats;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
@@ -44,16 +45,10 @@ import net.runelite.client.ui.overlay.OverlayManager;
 @Slf4j
 public class PoisonDynamitePlugin extends Plugin
 {
-	private static final int GAME_TICK_MILLIS = 600;
-	private static final int POISON_CYCLE_TICKS = 30;
-	static final int POISON_TICK_MILLIS = POISON_CYCLE_TICKS * GAME_TICK_MILLIS;
+	static final int GAME_TICK_MILLIS = 600;
 	private static final int RESULT_DISPLAY_MILLIS = 3000;
-
-	enum State
-	{
-		IDLE,
-		AWAITING_POISON
-	}
+	// give the detonation hitsplat a few ticks to land before giving up
+	private static final int DETONATION_TIMEOUT_TICKS = 10;
 
 	@Inject
 	private Client client;
@@ -65,7 +60,7 @@ public class PoisonDynamitePlugin extends Plugin
 	private OverlayManager overlayManager;
 
 	@Inject
-	private ItemManager itemManager;
+	private Notifier notifier;
 
 	@Inject
 	private PoisonDynamiteOverlay overlay;
@@ -76,11 +71,7 @@ public class PoisonDynamitePlugin extends Plugin
 	@Inject
 	private NpcStatsManager npcStatsManager;
 
-	@Getter
-	private State state = State.IDLE;
-
-	@Getter
-	private NPC trackedNpc;
+	private final Map<NPC, PoisonAttempt> attempts = new HashMap<>();
 
 	@Getter
 	private String trackedNpcName;
@@ -89,21 +80,10 @@ public class PoisonDynamitePlugin extends Plugin
 	private int trackedNpcId = -1;
 
 	@Getter
-	private Instant countdownStart;
+	private int sessionAttempts;
 
 	@Getter
-	private Instant resultTime;
-
-	@Getter
-	private boolean poisonSuccess;
-
-	@Getter
-	private boolean poisonFailed;
-
-	@Getter
-	private boolean detonationMiss;
-
-	private boolean awaitingDetonationHit;
+	private int sessionProcs;
 
 	private Set<Integer> trackedNpcIds = new HashSet<>();
 
@@ -126,7 +106,7 @@ public class PoisonDynamitePlugin extends Plugin
 	{
 		overlayManager.remove(overlay);
 		overlayManager.remove(npcOverlay);
-		clearTrackedNpc();
+		reset();
 	}
 
 	@Subscribe
@@ -178,51 +158,48 @@ public class PoisonDynamitePlugin extends Plugin
 		}
 
 		trackNpc(npc);
-		resultTime = null;
-		poisonSuccess = false;
-		poisonFailed = false;
-		detonationMiss = false;
-		awaitingDetonationHit = true;
-		countdownStart = null;
-		state = State.AWAITING_POISON;
+		attempts.put(npc, new PoisonAttempt(npc));
+		sessionAttempts++;
 		log.debug("Dynamite(p) used on NPC: {} (id={}), awaiting detonation hit", npc.getName(), npc.getId());
 	}
 
 	@Subscribe
 	public void onHitsplatApplied(HitsplatApplied event)
 	{
-		if (state != State.AWAITING_POISON || trackedNpc == null || event.getActor() != trackedNpc)
+		PoisonAttempt attempt = attempts.get(event.getActor());
+		if (attempt == null || attempt.isResolved())
 		{
 			return;
 		}
 
 		var hitsplat = event.getHitsplat();
-		int type = hitsplat.getHitsplatType();
 		int amount = hitsplat.getAmount();
 
-		if (type == HitsplatID.POISON && !poisonSuccess && !poisonFailed)
+		if (hitsplat.getHitsplatType() == HitsplatID.POISON)
 		{
-			log.debug("Poison proc on {}! Damage: {}", trackedNpcName, amount);
-			poisonSuccess = true;
-			awaitingDetonationHit = false;
-			resultTime = Instant.now();
+			log.debug("Poison proc on {}! Damage: {}", attempt.npc.getName(), amount);
+			attempt.resolve(true);
+			sessionProcs++;
+			if (config.notifyOnProc())
+			{
+				notifier.notify("Poison proc on " + attempt.npc.getName());
+			}
 			return;
 		}
 
-		if (awaitingDetonationHit && type != HitsplatID.POISON)
+		// only our own hitsplat can be the detonation result
+		if (attempt.awaitingDetonationHit && hitsplat.isMine())
 		{
-			awaitingDetonationHit = false;
 			if (amount <= 0)
 			{
-				log.debug("Dynamite missed on {} (hit 0)", trackedNpcName);
-				detonationMiss = true;
-				poisonFailed = true;
-				resultTime = Instant.now();
+				log.debug("Dynamite missed on {} (hit 0)", attempt.npc.getName());
+				attempt.detonationMiss = true;
+				attempt.resolve(false);
 			}
 			else
 			{
-				countdownStart = Instant.now();
-				log.debug("Dynamite hit on {} for {}, countdown started", trackedNpcName, amount);
+				attempt.startCountdown();
+				log.debug("Dynamite hit on {} for {}, countdown started", attempt.npc.getName(), amount);
 			}
 		}
 	}
@@ -230,202 +207,64 @@ public class PoisonDynamitePlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
-		if (state != State.AWAITING_POISON)
+		Iterator<PoisonAttempt> it = attempts.values().iterator();
+		while (it.hasNext())
 		{
-			return;
-		}
-
-		if (poisonSuccess || poisonFailed)
-		{
-			if (resultTime != null
-				&& Duration.between(resultTime, Instant.now()).toMillis() >= RESULT_DISPLAY_MILLIS)
+			PoisonAttempt attempt = it.next();
+			if (attempt.isResolved())
 			{
-				state = State.IDLE;
-				countdownStart = null;
-				resultTime = null;
-				poisonSuccess = false;
-				poisonFailed = false;
+				if (attempt.resultTime != null
+					&& Duration.between(attempt.resultTime, Instant.now()).toMillis() >= RESULT_DISPLAY_MILLIS)
+				{
+					it.remove();
+				}
+			}
+			else if (attempt.awaitingDetonationHit)
+			{
+				if (++attempt.ticksAwaitingDetonation > DETONATION_TIMEOUT_TICKS)
+				{
+					log.debug("No detonation hitsplat on {}, abandoning attempt", attempt.npc.getName());
+					it.remove();
+				}
+			}
+			else if (--attempt.remainingTicks <= 0)
+			{
+				log.debug("Poison timer expired on {}", attempt.npc.getName());
+				attempt.resolve(false);
 			}
 		}
-		else if (getRemainingMillis() <= 0)
+	}
+
+	@Subscribe
+	public void onNpcDespawned(NpcDespawned event)
+	{
+		attempts.remove(event.getNpc());
+	}
+
+	@Subscribe
+	public void onActorDeath(ActorDeath event)
+	{
+		PoisonAttempt attempt = attempts.get(event.getActor());
+		if (attempt != null && !attempt.isResolved())
 		{
-			log.debug("Poison timer expired on {}", trackedNpcName);
-			poisonFailed = true;
-			resultTime = Instant.now();
+			attempt.resolve(false);
 		}
 	}
 
-	private void trackNpc(NPC npc)
+	Iterable<PoisonAttempt> getAttempts()
 	{
-		trackedNpc = npc;
-		trackedNpcName = npc.getName() != null ? npc.getName() : "Unknown";
-		trackedNpcId = npc.getId();
-		if (trackedNpcIds.add(trackedNpcId))
-		{
-			saveTrackedNpcs();
-		}
-		npcStatsManager.getStats(trackedNpcName, trackedNpcId);
+		return attempts.values();
 	}
 
-	void clearTrackedNpc()
+	Set<Integer> getTrackedNpcIds()
 	{
-		trackedNpc = null;
-		trackedNpcName = null;
-		trackedNpcId = -1;
-		state = State.IDLE;
-		countdownStart = null;
-		resultTime = null;
-		poisonSuccess = false;
-		poisonFailed = false;
-		detonationMiss = false;
-		awaitingDetonationHit = false;
+		return trackedNpcIds;
 	}
 
-	long getRemainingMillis()
+	int getDynamiteCount()
 	{
-		if (countdownStart == null)
-		{
-			return POISON_TICK_MILLIS;
-		}
-		return POISON_TICK_MILLIS - Duration.between(countdownStart, Instant.now()).toMillis();
-	}
-
-	double getCountdownProgress()
-	{
-		if (countdownStart == null)
-		{
-			return 0.0;
-		}
-		long elapsed = Duration.between(countdownStart, Instant.now()).toMillis();
-		return Math.min(1.0, (double) elapsed / POISON_TICK_MILLIS);
-	}
-
-	String getAttackStyle()
-	{
-		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
-		if (equipment == null)
-		{
-			return "crush";
-		}
-
-		Item[] items = equipment.getItems();
-		if (items == null)
-		{
-			return "crush";
-		}
-
-		int weaponIdx = EquipmentInventorySlot.WEAPON.getSlotIdx();
-		if (weaponIdx >= items.length)
-		{
-			return "crush";
-		}
-
-		Item weapon = items[weaponIdx];
-		if (weapon == null || weapon.getId() == -1)
-		{
-			return "crush";
-		}
-
-		ItemStats stats = itemManager.getItemStats(weapon.getId());
-		if (stats == null || !stats.isEquipable())
-		{
-			return "crush";
-		}
-
-		ItemEquipmentStats eq = stats.getEquipment();
-		int stab = eq.getAstab();
-		int slash = eq.getAslash();
-		int crush = eq.getAcrush();
-		int magic = eq.getAmagic();
-		int range = eq.getArange();
-
-		if (range > 0 && range >= stab && range >= slash && range >= crush && range >= magic)
-		{
-			return "ranged";
-		}
-		if (magic > 0 && magic >= stab && magic >= slash && magic >= crush)
-		{
-			return "magic";
-		}
-		if (slash >= stab && slash >= crush)
-		{
-			return "slash";
-		}
-		if (stab >= crush)
-		{
-			return "stab";
-		}
-		return "crush";
-	}
-
-	int getEquipmentAttackBonus()
-	{
-		String style = getAttackStyle();
-		ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
-		if (equipment == null)
-		{
-			return 0;
-		}
-
-		Item[] items = equipment.getItems();
-		if (items == null)
-		{
-			return 0;
-		}
-
-		int total = 0;
-		for (Item item : items)
-		{
-			if (item == null || item.getId() == -1)
-			{
-				continue;
-			}
-			ItemStats stats = itemManager.getItemStats(item.getId());
-			if (stats == null || !stats.isEquipable())
-			{
-				continue;
-			}
-			ItemEquipmentStats eq = stats.getEquipment();
-			switch (style)
-			{
-				case "stab":
-					total += eq.getAstab();
-					break;
-				case "slash":
-					total += eq.getAslash();
-					break;
-				case "crush":
-					total += eq.getAcrush();
-					break;
-				case "magic":
-					total += eq.getAmagic();
-					break;
-				case "ranged":
-					total += eq.getArange();
-					break;
-			}
-		}
-		return total;
-	}
-
-	int getEffectiveAttackLevel()
-	{
-		String style = getAttackStyle();
-		Skill skill;
-		switch (style)
-		{
-			case "ranged":
-				skill = Skill.RANGED;
-				break;
-			case "magic":
-				skill = Skill.MAGIC;
-				break;
-			default:
-				skill = Skill.ATTACK;
-				break;
-		}
-		int visibleLevel = client.getBoostedSkillLevel(skill);
-		return HitChanceCalculator.getEffectiveLevel(visibleLevel, 1.0, 0);
+		ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
+		return inventory == null ? 0 : inventory.count(ItemID.LOVAKENGJ_DYNAMITE_POISON);
 	}
 
 	int getFiremakingLevel()
@@ -436,6 +275,26 @@ public class PoisonDynamitePlugin extends Plugin
 	NpcStatsManager getNpcStatsManager()
 	{
 		return npcStatsManager;
+	}
+
+	void reset()
+	{
+		attempts.clear();
+		trackedNpcName = null;
+		trackedNpcId = -1;
+		sessionAttempts = 0;
+		sessionProcs = 0;
+	}
+
+	private void trackNpc(NPC npc)
+	{
+		trackedNpcName = npc.getName() != null ? npc.getName() : "Unknown";
+		trackedNpcId = npc.getId();
+		if (trackedNpcIds.add(trackedNpcId))
+		{
+			saveTrackedNpcs();
+		}
+		npcStatsManager.getStats(trackedNpcName, trackedNpcId);
 	}
 
 	private void onTrackMenuClicked(MenuEntry entry)
@@ -467,9 +326,11 @@ public class PoisonDynamitePlugin extends Plugin
 		int id = npc.getId();
 		trackedNpcIds.remove(id);
 		saveTrackedNpcs();
+		attempts.keySet().removeIf(n -> n.getId() == id);
 		if (trackedNpcId == id)
 		{
-			clearTrackedNpc();
+			trackedNpcName = null;
+			trackedNpcId = -1;
 		}
 		log.debug("Untracked NPC: {} (id={})", npc.getName(), id);
 	}

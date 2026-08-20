@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.inject.Inject;
@@ -23,11 +24,14 @@ class NpcStatsManager
 {
 	private static final HttpUrl WIKI_API_URL = HttpUrl.parse(
 		"https://oldschool.runescape.wiki/api.php");
+	private static final long RETRY_BACKOFF_MILLIS = 30_000;
 
 	private final OkHttpClient httpClient;
 	private final Map<String, NpcDefenceStats> cache = new ConcurrentHashMap<>();
 	// Track in-flight requests so we don't duplicate fetches
 	private final Map<String, Boolean> pending = new ConcurrentHashMap<>();
+	// Failed lookups are retried after a backoff instead of being cached as zeros
+	private final Map<String, Instant> failures = new ConcurrentHashMap<>();
 
 	@Inject
 	NpcStatsManager(OkHttpClient httpClient)
@@ -42,45 +46,48 @@ class NpcStatsManager
 			return null;
 		}
 
-		String key = npcName + ":" + npcId;
+		String key = key(npcName, npcId);
 		NpcDefenceStats cached = cache.get(key);
 		if (cached != null)
 		{
 			return cached;
 		}
 
-		// Also check by name only (for NPCs where we haven't matched ID yet)
-		cached = cache.get(npcName);
-		if (cached != null)
+		Instant failedAt = failures.get(key);
+		if (failedAt != null
+			&& Instant.now().isBefore(failedAt.plusMillis(RETRY_BACKOFF_MILLIS)))
 		{
-			return cached;
+			return null;
 		}
 
 		// Start fetch if not already pending
 		if (pending.putIfAbsent(key, Boolean.TRUE) == null)
 		{
-			fetchStats(npcName, npcId, key);
+			fetchStats(npcName, npcId, key, false);
 		}
 
 		return null;
 	}
 
-	boolean isLoading(String npcName, int npcId)
+	boolean isUnavailable(String npcName, int npcId)
 	{
-		if (npcName == null)
-		{
-			return false;
-		}
-		String key = npcName + ":" + npcId;
-		return pending.containsKey(key) && !cache.containsKey(key);
+		return npcName != null && failures.containsKey(key(npcName, npcId));
 	}
 
-	private void fetchStats(String npcName, int npcId, String cacheKey)
+	private static String key(String npcName, int npcId)
 	{
+		return npcName + ":" + npcId;
+	}
+
+	private void fetchStats(String npcName, int npcId, String cacheKey, boolean byId)
+	{
+		String filter = byId
+			? ".where('id'," + npcId + ")"
+			: ".where('name','" + npcName.replace("'", "\\'") + "')";
 		String query = "bucket('infobox_monster')" +
 			".select('id','defence_level','stab_defence_bonus','slash_defence_bonus'," +
 			"'crush_defence_bonus','magic_defence_bonus','range_defence_bonus')" +
-			".where('name','" + npcName.replace("'", "\\'") + "').run()";
+			filter + ".run()";
 
 		HttpUrl url = WIKI_API_URL.newBuilder()
 			.addQueryParameter("action", "bucket")
@@ -99,10 +106,7 @@ class NpcStatsManager
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("Failed to fetch NPC stats for {}", npcName, e);
-				// Cache zeroed stats as fallback
-				NpcDefenceStats fallback = new NpcDefenceStats(0, 0, 0, 0, 0, 0);
-				cache.put(cacheKey, fallback);
-				pending.remove(cacheKey);
+				fail(cacheKey);
 			}
 
 			@Override
@@ -113,97 +117,128 @@ class NpcStatsManager
 					if (!response.isSuccessful())
 					{
 						log.warn("Wiki API returned {} for {}", response.code(), npcName);
-						cache.put(cacheKey, new NpcDefenceStats(0, 0, 0, 0, 0, 0));
-						pending.remove(cacheKey);
+						fail(cacheKey);
 						return;
 					}
 
 					String body = response.body().string();
 					NpcDefenceStats stats = parseResponse(body, npcId);
+					if (stats == null)
+					{
+						if (!byId)
+						{
+							// in-game name may not match the wiki page name;
+							// retry the lookup by NPC id
+							log.debug("No wiki match by name for {}, retrying by id {}", npcName, npcId);
+							fetchStats(npcName, npcId, cacheKey, true);
+							return;
+						}
+						log.warn("No wiki stats found for {} (id={})", npcName, npcId);
+						fail(cacheKey);
+						return;
+					}
+
 					cache.put(cacheKey, stats);
+					failures.remove(cacheKey);
 					pending.remove(cacheKey);
 					log.debug("Fetched NPC stats for {} (id={}): {}", npcName, npcId, stats);
 				}
 				catch (Exception e)
 				{
 					log.warn("Error parsing NPC stats for {}", npcName, e);
-					cache.put(cacheKey, new NpcDefenceStats(0, 0, 0, 0, 0, 0));
-					pending.remove(cacheKey);
+					fail(cacheKey);
 				}
 			}
 		});
 	}
 
-	private NpcDefenceStats parseResponse(String json, int targetNpcId)
+	private void fail(String cacheKey)
+	{
+		failures.put(cacheKey, Instant.now());
+		pending.remove(cacheKey);
+	}
+
+	// The bucket API returns one row per infobox version: scalar stat fields
+	// plus an "id" array listing the NPC ids that version covers.
+	static NpcDefenceStats parseResponse(String json, int targetNpcId)
 	{
 		JsonObject root = new JsonParser().parse(json).getAsJsonObject();
-
-		if (!root.has("result"))
+		if (!root.has("bucket") || !root.get("bucket").isJsonArray())
 		{
-			return new NpcDefenceStats(0, 0, 0, 0, 0, 0);
+			return null;
 		}
 
-		JsonArray result = root.getAsJsonArray("result");
-		if (result.size() == 0)
+		JsonArray rows = root.getAsJsonArray("bucket");
+		if (rows.size() == 0)
 		{
-			return new NpcDefenceStats(0, 0, 0, 0, 0, 0);
+			return null;
 		}
 
-		// Each result entry has arrays for each field; find the variant matching our NPC ID
-		JsonObject entry = result.get(0).getAsJsonObject();
-
-		JsonArray ids = getJsonArray(entry, "id");
-		JsonArray defLevels = getJsonArray(entry, "defence_level");
-		JsonArray stabDefs = getJsonArray(entry, "stab_defence_bonus");
-		JsonArray slashDefs = getJsonArray(entry, "slash_defence_bonus");
-		JsonArray crushDefs = getJsonArray(entry, "crush_defence_bonus");
-		JsonArray magicDefs = getJsonArray(entry, "magic_defence_bonus");
-		JsonArray rangeDefs = getJsonArray(entry, "range_defence_bonus");
-
-		// Try to match by NPC ID
-		int matchIndex = 0;
-		if (ids != null)
+		JsonObject match = null;
+		for (JsonElement rowElem : rows)
 		{
-			for (int i = 0; i < ids.size(); i++)
+			if (rowElem.isJsonObject() && rowContainsId(rowElem.getAsJsonObject(), targetNpcId))
 			{
-				JsonElement idElem = ids.get(i);
-				if (!idElem.isJsonNull() && idElem.getAsInt() == targetNpcId)
-				{
-					matchIndex = i;
-					break;
-				}
+				match = rowElem.getAsJsonObject();
+				break;
 			}
+		}
+		if (match == null)
+		{
+			match = rows.get(0).getAsJsonObject();
 		}
 
 		return new NpcDefenceStats(
-			getIntAt(defLevels, matchIndex),
-			getIntAt(stabDefs, matchIndex),
-			getIntAt(slashDefs, matchIndex),
-			getIntAt(crushDefs, matchIndex),
-			getIntAt(magicDefs, matchIndex),
-			getIntAt(rangeDefs, matchIndex)
+			getInt(match, "defence_level"),
+			getInt(match, "stab_defence_bonus"),
+			getInt(match, "slash_defence_bonus"),
+			getInt(match, "crush_defence_bonus"),
+			getInt(match, "magic_defence_bonus"),
+			getInt(match, "range_defence_bonus")
 		);
 	}
 
-	private static JsonArray getJsonArray(JsonObject obj, String key)
+	private static boolean rowContainsId(JsonObject row, int targetNpcId)
 	{
-		if (obj.has(key) && obj.get(key).isJsonArray())
+		if (!row.has("id"))
 		{
-			return obj.getAsJsonArray(key);
+			return false;
 		}
-		return null;
+		JsonElement idElem = row.get("id");
+		if (idElem.isJsonArray())
+		{
+			for (JsonElement e : idElem.getAsJsonArray())
+			{
+				if (asInt(e, -1) == targetNpcId)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+		return asInt(idElem, -1) == targetNpcId;
 	}
 
-	private static int getIntAt(JsonArray array, int index)
+	private static int getInt(JsonObject row, String key)
 	{
-		if (array == null || index >= array.size())
+		if (!row.has(key))
 		{
 			return 0;
 		}
-		JsonElement elem = array.get(index);
-		if (elem.isJsonNull())
+		JsonElement elem = row.get(key);
+		if (elem.isJsonArray())
 		{
-			return 0;
+			JsonArray array = elem.getAsJsonArray();
+			elem = array.size() > 0 ? array.get(0) : null;
+		}
+		return elem == null ? 0 : asInt(elem, 0);
+	}
+
+	private static int asInt(JsonElement elem, int fallback)
+	{
+		if (elem == null || elem.isJsonNull() || !elem.isJsonPrimitive())
+		{
+			return fallback;
 		}
 		try
 		{
@@ -211,7 +246,7 @@ class NpcStatsManager
 		}
 		catch (NumberFormatException e)
 		{
-			return 0;
+			return fallback;
 		}
 	}
 

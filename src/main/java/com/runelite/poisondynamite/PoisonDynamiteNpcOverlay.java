@@ -6,9 +6,12 @@ import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.Shape;
 import javax.inject.Inject;
+import net.runelite.api.Client;
 import net.runelite.api.NPC;
 import net.runelite.api.Point;
+import net.runelite.api.WorldView;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -20,16 +23,20 @@ class PoisonDynamiteNpcOverlay extends Overlay
 	private static final Color COLOR_SUCCESS = new Color(0, 200, 0);
 	private static final Color COLOR_FAILED = Color.RED;
 	private static final Color COLOR_BG = new Color(0, 0, 0, 128);
+	private static final Color COLOR_HIGHLIGHT = new Color(0, 200, 0, 120);
 
 	private static final int RING_DIAMETER = 30;
 	private static final float RING_STROKE = 3f;
+	private static final int WARNING_SECONDS = 5;
 
+	private final Client client;
 	private final PoisonDynamitePlugin plugin;
 	private final PoisonDynamiteConfig config;
 
 	@Inject
-	PoisonDynamiteNpcOverlay(PoisonDynamitePlugin plugin, PoisonDynamiteConfig config)
+	PoisonDynamiteNpcOverlay(Client client, PoisonDynamitePlugin plugin, PoisonDynamiteConfig config)
 	{
+		this.client = client;
 		this.plugin = plugin;
 		this.config = config;
 		setPosition(OverlayPosition.DYNAMIC);
@@ -39,34 +46,61 @@ class PoisonDynamiteNpcOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.showNpcOverlay())
+		graphics.setRenderingHint(
+			RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+		if (config.highlightTrackedNpcs())
 		{
-			return null;
+			renderTrackedHighlights(graphics);
 		}
 
-		if (plugin.getState() != PoisonDynamitePlugin.State.AWAITING_POISON)
+		if (config.showNpcOverlay())
 		{
-			return null;
+			for (PoisonAttempt attempt : plugin.getAttempts())
+			{
+				renderRing(graphics, attempt);
+			}
 		}
 
-		NPC npc = plugin.getTrackedNpc();
-		if (npc == null)
+		return null;
+	}
+
+	private void renderTrackedHighlights(Graphics2D graphics)
+	{
+		WorldView wv = client.getTopLevelWorldView();
+		if (wv == null)
 		{
-			return null;
+			return;
 		}
 
+		graphics.setColor(COLOR_HIGHLIGHT);
+		graphics.setStroke(new BasicStroke(2f));
+		for (NPC npc : wv.npcs())
+		{
+			if (npc == null || !plugin.getTrackedNpcIds().contains(npc.getId()))
+			{
+				continue;
+			}
+			Shape hull = npc.getConvexHull();
+			if (hull != null)
+			{
+				graphics.draw(hull);
+			}
+		}
+	}
+
+	private void renderRing(Graphics2D graphics, PoisonAttempt attempt)
+	{
+		NPC npc = attempt.npc;
 		Point point = npc.getCanvasTextLocation(graphics, "", npc.getLogicalHeight() + 40);
 		if (point == null)
 		{
-			return null;
+			return;
 		}
 
 		int centerX = point.getX();
 		int centerY = point.getY();
 		int radius = RING_DIAMETER / 2;
-
-		graphics.setRenderingHint(
-			RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
 		// Background ring
 		graphics.setColor(COLOR_BG);
@@ -74,9 +108,8 @@ class PoisonDynamiteNpcOverlay extends Overlay
 		graphics.drawOval(centerX - radius, centerY - radius, RING_DIAMETER, RING_DIAMETER);
 
 		// Progress arc
-		Color ringColor = getRingColor();
-		double progress = plugin.getCountdownProgress();
-		int arcAngle = (int) (progress * 360);
+		Color ringColor = getRingColor(attempt);
+		int arcAngle = (int) (attempt.getProgress() * 360);
 
 		graphics.setColor(ringColor);
 		graphics.setStroke(new BasicStroke(RING_STROKE));
@@ -84,7 +117,7 @@ class PoisonDynamiteNpcOverlay extends Overlay
 			RING_DIAMETER, RING_DIAMETER, 90, -arcAngle);
 
 		// Countdown text
-		String text = getDisplayText();
+		String text = getDisplayText(attempt);
 		FontMetrics fm = graphics.getFontMetrics();
 		int textWidth = fm.stringWidth(text);
 		int textX = centerX - textWidth / 2;
@@ -96,43 +129,39 @@ class PoisonDynamiteNpcOverlay extends Overlay
 		// Text foreground
 		graphics.setColor(ringColor);
 		graphics.drawString(text, textX, textY);
-
-		return null;
 	}
 
-	private Color getRingColor()
+	private static Color getRingColor(PoisonAttempt attempt)
 	{
-		if (plugin.isPoisonSuccess())
+		if (attempt.poisonSuccess)
 		{
 			return COLOR_SUCCESS;
 		}
-		if (plugin.isPoisonFailed())
+		if (attempt.poisonFailed)
 		{
 			return COLOR_FAILED;
 		}
-		if (plugin.getRemainingMillis() < 5000)
+		if (attempt.isCountingDown() && attempt.getRemainingSeconds() <= WARNING_SECONDS)
 		{
 			return COLOR_WARNING;
 		}
 		return COLOR_WAITING;
 	}
 
-	private String getDisplayText()
+	private static String getDisplayText(PoisonAttempt attempt)
 	{
-		if (plugin.isPoisonSuccess())
+		if (attempt.poisonSuccess)
 		{
 			return "OK";
 		}
-		if (plugin.isDetonationMiss())
+		if (attempt.detonationMiss)
 		{
 			return "MISS";
 		}
-		if (plugin.isPoisonFailed())
+		if (attempt.poisonFailed)
 		{
 			return "X";
 		}
-		long remaining = plugin.getRemainingMillis();
-		int seconds = (int) Math.max(0, remaining / 1000);
-		return String.valueOf(seconds);
+		return String.valueOf(attempt.getRemainingSeconds());
 	}
 }

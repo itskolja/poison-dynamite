@@ -21,6 +21,61 @@ public interface PoisonDynamiteConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+		keyName = "showInfoPanel",
+		name = "Show info panel",
+		description = "Show the info panel with target, hit chance, poison chance and max hit.",
+		position = 2
+	)
+	default boolean showInfoPanel()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "highlightTrackedNpcs",
+		name = "Highlight tracked NPCs",
+		description = "Outline NPCs on the tracked list.",
+		position = 3
+	)
+	default boolean highlightTrackedNpcs()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "showDynamiteCount",
+		name = "Show dynamite count",
+		description = "Show remaining Dynamite(p) in the info panel, warning when low.",
+		position = 4
+	)
+	default boolean showDynamiteCount()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showSessionStats",
+		name = "Show session stats",
+		description = "Show poison procs vs attempts for this session in the info panel.",
+		position = 5
+	)
+	default boolean showSessionStats()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "notifyOnProc",
+		name = "Notify on poison proc",
+		description = "Send a system notification when the poison procs.",
+		position = 6
+	)
+	default boolean notifyOnProc()
+	{
+		return false;
+	}
+
 @ConfigItem(
 		keyName = TRACKED_NPCS_KEY,
 		name = "Tracked NPC IDs",

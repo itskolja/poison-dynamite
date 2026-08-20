@@ -18,23 +18,34 @@ class PoisonDynamiteOverlay extends OverlayPanel
 	private static final Color COLOR_HIGH = new Color(0, 200, 0);
 	private static final Color COLOR_MEDIUM = Color.YELLOW;
 	private static final Color COLOR_LOW = Color.RED;
+	private static final int LOW_DYNAMITE_THRESHOLD = 10;
 
 	private final PoisonDynamitePlugin plugin;
+	private final PoisonDynamiteConfig config;
+	private final CombatStyleResolver styleResolver;
 
 	@Inject
-	PoisonDynamiteOverlay(PoisonDynamitePlugin plugin)
+	PoisonDynamiteOverlay(PoisonDynamitePlugin plugin, PoisonDynamiteConfig config,
+		CombatStyleResolver styleResolver)
 	{
 		super(plugin);
 		this.plugin = plugin;
-		setPosition(OverlayPosition.BOTTOM_LEFT);
+		this.config = config;
+		this.styleResolver = styleResolver;
+		setPosition(OverlayPosition.TOP_LEFT);
 		addMenuEntry(RUNELITE_OVERLAY_CONFIG, OPTION_CONFIGURE, "Poison Dynamite overlay");
 		addMenuEntry(RUNELITE_OVERLAY, RESET_OPTION, "Poison Dynamite overlay",
-			e -> plugin.clearTrackedNpc());
+			e -> plugin.reset());
 	}
 
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		if (!config.showInfoPanel())
+		{
+			return null;
+		}
+
 		String npcName = plugin.getTrackedNpcName();
 		if (npcName == null)
 		{
@@ -56,16 +67,18 @@ class PoisonDynamiteOverlay extends OverlayPanel
 
 		if (npcStats == null)
 		{
+			boolean unavailable = npcStatsManager.isUnavailable(npcName, plugin.getTrackedNpcId());
 			panelComponent.getChildren().add(LineComponent.builder()
 				.left("Hit chance:")
-				.right("Loading...")
+				.right(unavailable ? "Unavailable" : "Loading...")
+				.rightColor(unavailable ? COLOR_LOW : Color.WHITE)
 				.build());
 		}
 		else
 		{
-			String style = plugin.getAttackStyle();
-			int effectiveLevel = plugin.getEffectiveAttackLevel();
-			int equipBonus = plugin.getEquipmentAttackBonus();
+			String style = styleResolver.getAttackStyle();
+			int effectiveLevel = styleResolver.getEffectiveAttackLevel(style);
+			int equipBonus = styleResolver.getEquipmentAttackBonus(style);
 			int npcDefLevel = npcStats.defenceLevel;
 			int npcStyleDef = npcStats.getDefenceForStyle(style);
 
@@ -103,6 +116,40 @@ class PoisonDynamiteOverlay extends OverlayPanel
 			panelComponent.getChildren().add(LineComponent.builder()
 				.left("Max hit:")
 				.right(String.valueOf(maxHit))
+				.build());
+		}
+
+		if (config.showDynamiteCount())
+		{
+			int count = plugin.getDynamiteCount();
+			Color countColor;
+			if (count == 0)
+			{
+				countColor = COLOR_LOW;
+			}
+			else if (count <= LOW_DYNAMITE_THRESHOLD)
+			{
+				countColor = COLOR_MEDIUM;
+			}
+			else
+			{
+				countColor = Color.WHITE;
+			}
+			panelComponent.getChildren().add(LineComponent.builder()
+				.left("Dynamite(p):")
+				.right(String.valueOf(count))
+				.rightColor(countColor)
+				.build());
+		}
+
+		if (config.showSessionStats() && plugin.getSessionAttempts() > 0)
+		{
+			int attempts = plugin.getSessionAttempts();
+			int procs = plugin.getSessionProcs();
+			panelComponent.getChildren().add(LineComponent.builder()
+				.left("Session:")
+				.right(String.format("%d/%d (%.0f%%)", procs, attempts,
+					100.0 * procs / attempts))
 				.build());
 		}
 
