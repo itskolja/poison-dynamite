@@ -54,6 +54,53 @@ public class NpcStatsManagerTest
 		assertEquals(0, stats.slashDef);
 	}
 
+	private static String parseApiJson(String wikitext)
+	{
+		return "{\"parse\":{\"title\":\"X\",\"wikitext\":{\"*\":" +
+			new com.google.gson.Gson().toJson(wikitext) + "}}}";
+	}
+
+	@Test
+	public void parsesUnversionedPoisonResistance()
+	{
+		String json = parseApiJson("{{Infobox Monster\n|id = 3010,3011\n|poisonous = No\n|poisonresistance = 100\n}}");
+		assertEquals("100", NpcStatsManager.parsePoisonResistance(json, 3011));
+	}
+
+	@Test
+	public void parsesVersionedPoisonResistanceMatchingId()
+	{
+		String json = parseApiJson("{{Infobox Monster\n|id1 = 100\n|poisonresistance1 = 0\n|id2 = 200,201\n|poisonresistance2 = poison\n}}");
+		assertEquals("poison", NpcStatsManager.parsePoisonResistance(json, 201));
+		assertEquals("0", NpcStatsManager.parsePoisonResistance(json, 100));
+	}
+
+	@Test
+	public void fallsBackToFirstResistanceWhenIdUnmatched()
+	{
+		String json = parseApiJson("{{Infobox Monster\n|id1 = 100\n|poisonresistance1 = 200\n|id2 = 300\n|poisonresistance2 = 0\n}}");
+		assertEquals("200", NpcStatsManager.parsePoisonResistance(json, 99999));
+	}
+
+	@Test
+	public void returnsNullWhenResistanceMissing()
+	{
+		assertNull(NpcStatsManager.parsePoisonResistance(
+			parseApiJson("{{Infobox Monster\n|id = 5\n|poisonous = No\n}}"), 5));
+		assertNull(NpcStatsManager.parsePoisonResistance("{\"error\":{\"code\":\"missingtitle\"}}", 5));
+	}
+
+	@Test
+	public void poisonImmunity()
+	{
+		NpcStatsManager.NpcDefenceStats base = new NpcStatsManager.NpcDefenceStats(1, 0, 0, 0, 0, 0);
+		assertEquals(false, base.isPoisonImmune());
+		assertEquals(false, base.withPoisonResistance("0").isPoisonImmune());
+		assertEquals(true, base.withPoisonResistance("100").isPoisonImmune());
+		assertEquals(true, base.withPoisonResistance("200").isPoisonImmune());
+		assertEquals(true, base.withPoisonResistance("poison").isPoisonImmune());
+	}
+
 	@Test
 	public void styleLookupPicksMatchingDefence()
 	{

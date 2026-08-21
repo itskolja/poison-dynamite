@@ -138,10 +138,9 @@ class NpcStatsManager
 						return;
 					}
 
-					cache.put(cacheKey, stats);
-					failures.remove(cacheKey);
-					pending.remove(cacheKey);
-					log.debug("Fetched NPC stats for {} (id={}): {}", npcName, npcId, stats);
+					// defence stats are in hand; poison resistance comes from the
+					// page wikitext (the bucket's poison_resistance field is broken)
+					fetchPoisonResistance(npcName, npcId, cacheKey, stats);
 				}
 				catch (Exception e)
 				{
@@ -152,11 +151,134 @@ class NpcStatsManager
 		});
 	}
 
+	private void fetchPoisonResistance(String npcName, int npcId, String cacheKey,
+		NpcDefenceStats stats)
+	{
+		HttpUrl url = WIKI_API_URL.newBuilder()
+			.addQueryParameter("action", "parse")
+			.addQueryParameter("page", npcName)
+			.addQueryParameter("prop", "wikitext")
+			.addQueryParameter("redirects", "1")
+			.addQueryParameter("format", "json")
+			.build();
+
+		Request request = new Request.Builder()
+			.url(url)
+			.header("User-Agent", "poison-dynamite-runelite-plugin")
+			.build();
+
+		httpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("Failed to fetch poison resistance for {}", npcName, e);
+				succeed(cacheKey, stats);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				String resistance = null;
+				try (response)
+				{
+					if (response.isSuccessful())
+					{
+						resistance = parsePoisonResistance(response.body().string(), npcId);
+					}
+				}
+				catch (Exception e)
+				{
+					log.warn("Error parsing poison resistance for {}", npcName, e);
+				}
+				succeed(cacheKey, stats.withPoisonResistance(resistance));
+				log.debug("Poison resistance for {} (id={}): {}", npcName, npcId, resistance);
+			}
+		});
+	}
+
+	private void succeed(String cacheKey, NpcDefenceStats stats)
+	{
+		cache.put(cacheKey, stats);
+		failures.remove(cacheKey);
+		pending.remove(cacheKey);
+	}
+
 	private void fail(String cacheKey)
 	{
 		failures.put(cacheKey, Instant.now());
 		pending.remove(cacheKey);
 	}
+
+	// Reads |poisonresistance (or |poisonresistanceN for versioned infoboxes)
+	// from the page wikitext, matching the version whose |idN list contains
+	// the target NPC id, falling back to the first value on the page.
+	static String parsePoisonResistance(String parseApiJson, int targetNpcId)
+	{
+		JsonObject root = new JsonParser().parse(parseApiJson).getAsJsonObject();
+		if (!root.has("parse"))
+		{
+			return null;
+		}
+		JsonObject parse = root.getAsJsonObject("parse");
+		if (!parse.has("wikitext"))
+		{
+			return null;
+		}
+		String wikitext = parse.getAsJsonObject("wikitext").get("*").getAsString();
+
+		Map<String, String> resistanceBySuffix = new java.util.HashMap<>();
+		String matchedSuffix = null;
+		String firstSuffix = null;
+
+		java.util.regex.Matcher m = INFOBOX_PARAM_PATTERN.matcher(wikitext);
+		while (m.find())
+		{
+			String param = m.group(1);
+			String suffix = m.group(2);
+			String value = m.group(3).trim();
+
+			if (param.equals("poisonresistance"))
+			{
+				resistanceBySuffix.putIfAbsent(suffix, value);
+				if (firstSuffix == null)
+				{
+					firstSuffix = suffix;
+				}
+			}
+			else if (matchedSuffix == null) // id param
+			{
+				for (String idStr : value.split(","))
+				{
+					try
+					{
+						if (Integer.parseInt(idStr.trim()) == targetNpcId)
+						{
+							matchedSuffix = suffix;
+							break;
+						}
+					}
+					catch (NumberFormatException ignored)
+					{
+					}
+				}
+			}
+		}
+
+		String value = matchedSuffix != null ? resistanceBySuffix.get(matchedSuffix) : null;
+		if (value == null && firstSuffix != null)
+		{
+			value = resistanceBySuffix.get(firstSuffix);
+		}
+		if (value == null || value.isEmpty())
+		{
+			return null;
+		}
+		return value.toLowerCase();
+	}
+
+	private static final java.util.regex.Pattern INFOBOX_PARAM_PATTERN =
+		java.util.regex.Pattern.compile("\\|\\s*(id|poisonresistance)(\\d*)\\s*=\\s*([^\\n|]*)");
 
 	// The bucket API returns one row per infobox version: scalar stat fields
 	// plus an "id" array listing the NPC ids that version covers.
@@ -258,9 +380,17 @@ class NpcStatsManager
 		final int crushDef;
 		final int magicDef;
 		final int rangeDef;
+		// "0", "100", "200" or "poison" (immune); null when unknown
+		final String poisonResistance;
 
 		NpcDefenceStats(int defenceLevel, int stabDef, int slashDef, int crushDef,
 			int magicDef, int rangeDef)
+		{
+			this(defenceLevel, stabDef, slashDef, crushDef, magicDef, rangeDef, null);
+		}
+
+		NpcDefenceStats(int defenceLevel, int stabDef, int slashDef, int crushDef,
+			int magicDef, int rangeDef, String poisonResistance)
 		{
 			this.defenceLevel = defenceLevel;
 			this.stabDef = stabDef;
@@ -268,6 +398,20 @@ class NpcStatsManager
 			this.crushDef = crushDef;
 			this.magicDef = magicDef;
 			this.rangeDef = rangeDef;
+			this.poisonResistance = poisonResistance;
+		}
+
+		NpcDefenceStats withPoisonResistance(String resistance)
+		{
+			return new NpcDefenceStats(defenceLevel, stabDef, slashDef, crushDef,
+				magicDef, rangeDef, resistance);
+		}
+
+		// resistance 100 blocks poison, 200 blocks poison and venom, and
+		// "poison" marks poison-based monsters — only 0 can be poisoned
+		boolean isPoisonImmune()
+		{
+			return poisonResistance != null && !"0".equals(poisonResistance);
 		}
 
 		int getDefenceForStyle(String style)
