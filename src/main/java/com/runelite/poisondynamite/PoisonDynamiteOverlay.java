@@ -110,7 +110,7 @@ class PoisonDynamiteOverlay extends OverlayPanel
 
 			boolean immune = npcStats.isPoisonImmune();
 			panelComponent.getChildren().add(LineComponent.builder()
-				.left("Poison chance:")
+				.left("Poison:")
 				.right(immune ? "Immune" : String.format("%.1f%%", poisonChance * 100))
 				.rightColor(immune ? COLOR_LOW : Color.WHITE)
 				.build());

@@ -6,12 +6,9 @@ import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
-import java.awt.Shape;
 import javax.inject.Inject;
-import net.runelite.api.Client;
 import net.runelite.api.NPC;
 import net.runelite.api.Point;
-import net.runelite.api.WorldView;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -23,20 +20,17 @@ class PoisonDynamiteNpcOverlay extends Overlay
 	private static final Color COLOR_SUCCESS = new Color(0, 200, 0);
 	private static final Color COLOR_FAILED = Color.RED;
 	private static final Color COLOR_BG = new Color(0, 0, 0, 128);
-	private static final Color COLOR_HIGHLIGHT = new Color(0, 200, 0, 120);
 
 	private static final int RING_DIAMETER = 30;
 	private static final float RING_STROKE = 3f;
 	private static final int WARNING_SECONDS = 5;
 
-	private final Client client;
 	private final PoisonDynamitePlugin plugin;
 	private final PoisonDynamiteConfig config;
 
 	@Inject
-	PoisonDynamiteNpcOverlay(Client client, PoisonDynamitePlugin plugin, PoisonDynamiteConfig config)
+	PoisonDynamiteNpcOverlay(PoisonDynamitePlugin plugin, PoisonDynamiteConfig config)
 	{
-		this.client = client;
 		this.plugin = plugin;
 		this.config = config;
 		setPosition(OverlayPosition.DYNAMIC);
@@ -46,47 +40,20 @@ class PoisonDynamiteNpcOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		if (!config.showNpcOverlay())
+		{
+			return null;
+		}
+
 		graphics.setRenderingHint(
 			RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-		if (config.highlightTrackedNpcs())
+		for (PoisonAttempt attempt : plugin.getAttempts())
 		{
-			renderTrackedHighlights(graphics);
-		}
-
-		if (config.showNpcOverlay())
-		{
-			for (PoisonAttempt attempt : plugin.getAttempts())
-			{
-				renderRing(graphics, attempt);
-			}
+			renderRing(graphics, attempt);
 		}
 
 		return null;
-	}
-
-	private void renderTrackedHighlights(Graphics2D graphics)
-	{
-		WorldView wv = client.getTopLevelWorldView();
-		if (wv == null)
-		{
-			return;
-		}
-
-		graphics.setColor(COLOR_HIGHLIGHT);
-		graphics.setStroke(new BasicStroke(2f));
-		for (NPC npc : wv.npcs())
-		{
-			if (npc == null || !plugin.getTrackedNpcIds().contains(npc.getId()))
-			{
-				continue;
-			}
-			Shape hull = npc.getConvexHull();
-			if (hull != null)
-			{
-				graphics.draw(hull);
-			}
-		}
 	}
 
 	private void renderRing(Graphics2D graphics, PoisonAttempt attempt)
