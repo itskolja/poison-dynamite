@@ -24,6 +24,8 @@ class NpcStatsManager
 {
 	private static final HttpUrl WIKI_API_URL = HttpUrl.parse(
 		"https://oldschool.runescape.wiki/api.php");
+	private static final String USER_AGENT =
+		"poison-dynamite-runelite-plugin (github.com/yonnski/poison-dynamite)";
 	private static final long RETRY_BACKOFF_MILLIS = 30_000;
 
 	private final OkHttpClient httpClient;
@@ -97,7 +99,7 @@ class NpcStatsManager
 
 		Request request = new Request.Builder()
 			.url(url)
-			.header("User-Agent", "poison-dynamite-runelite-plugin")
+			.header("User-Agent", USER_AGENT)
 			.build();
 
 		httpClient.newCall(request).enqueue(new Callback()
@@ -164,7 +166,7 @@ class NpcStatsManager
 
 		Request request = new Request.Builder()
 			.url(url)
-			.header("User-Agent", "poison-dynamite-runelite-plugin")
+			.header("User-Agent", USER_AGENT)
 			.build();
 
 		httpClient.newCall(request).enqueue(new Callback()
