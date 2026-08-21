@@ -16,6 +16,7 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
 import net.runelite.api.NPC;
 import net.runelite.api.Skill;
+import net.runelite.api.WorldView;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.HitsplatApplied;
@@ -27,6 +28,8 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.specialcounter.SpecialCounterUpdate;
+import net.runelite.client.plugins.specialcounter.SpecialWeapon;
 import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
@@ -64,6 +67,11 @@ public class PoisonDynamitePlugin extends Plugin
 	private NpcStatsManager npcStatsManager;
 
 	private final Map<NPC, PoisonAttempt> attempts = new HashMap<>();
+
+	// cumulative defence drained by special attacks, per NPC instance
+	private final Map<NPC, Integer> defenceDrains = new HashMap<>();
+
+	private NPC trackedNpc;
 
 	@Getter
 	private String trackedNpcName;
@@ -119,6 +127,15 @@ public class PoisonDynamitePlugin extends Plugin
 		}
 
 		trackNpc(npc);
+
+		// re-using dynamite mid-countdown is usually just a check click;
+		// keep the running timer instead of resetting it
+		PoisonAttempt existing = attempts.get(npc);
+		if (existing != null && !existing.isResolved())
+		{
+			return;
+		}
+
 		attempts.put(npc, new PoisonAttempt(npc));
 		sessionAttempts++;
 		log.debug("Dynamite(p) used on NPC: {} (id={}), awaiting detonation hit", npc.getName(), npc.getId());
@@ -200,6 +217,73 @@ public class PoisonDynamitePlugin extends Plugin
 	public void onNpcDespawned(NpcDespawned event)
 	{
 		attempts.remove(event.getNpc());
+		defenceDrains.remove(event.getNpc());
+		if (event.getNpc() == trackedNpc)
+		{
+			trackedNpc = null;
+		}
+	}
+
+	@Subscribe
+	public void onSpecialCounterUpdate(SpecialCounterUpdate event)
+	{
+		if (event.getWorld() != client.getWorld())
+		{
+			return;
+		}
+
+		WorldView wv = client.getTopLevelWorldView();
+		NPC npc = wv == null ? null : wv.npcs().byIndex(event.getNpcIndex());
+		if (npc == null)
+		{
+			return;
+		}
+
+		NpcStatsManager.NpcDefenceStats stats = npcStatsManager.getStats(npc.getName(), npc.getId());
+		if (stats == null)
+		{
+			return;
+		}
+
+		int current = Math.max(0, stats.defenceLevel - defenceDrains.getOrDefault(npc, 0));
+		int drain = defenceDrain(event.getWeapon(), event.getHit(), current);
+		if (drain > 0)
+		{
+			defenceDrains.merge(npc, drain, Integer::sum);
+			log.debug("Defence drain on {}: -{} ({} -> {})", npc.getName(), drain, current, current - drain);
+		}
+	}
+
+	private static int defenceDrain(SpecialWeapon weapon, int hit, int currentDefence)
+	{
+		if (hit <= 0)
+		{
+			return 0;
+		}
+		switch (weapon)
+		{
+			case DRAGON_WARHAMMER:
+				return currentDefence * 30 / 100;
+			case ELDER_MAUL:
+				return currentDefence * 35 / 100;
+			case BANDOS_GODSWORD:
+			case BONE_DAGGER:
+			case DORGESHUUN_CROSSBOW:
+				return hit;
+			case BARRELCHEST_ANCHOR:
+				return hit / 10;
+			case BULWARK:
+			case TONALZTICS_OF_RALOS:
+			case EMBERLIGHT:
+				return currentDefence * 10 / 100;
+			case ACCURSED_SCEPTRE:
+				return currentDefence * 15 / 100;
+			case ARCLIGHT:
+			case DARKLIGHT:
+				return currentDefence * 5 / 100;
+			default:
+				return 0;
+		}
 	}
 
 	@Subscribe
@@ -215,6 +299,11 @@ public class PoisonDynamitePlugin extends Plugin
 	Iterable<PoisonAttempt> getAttempts()
 	{
 		return attempts.values();
+	}
+
+	int getTrackedDefenceDrain()
+	{
+		return trackedNpc == null ? 0 : defenceDrains.getOrDefault(trackedNpc, 0);
 	}
 
 	int getDynamiteCount()
@@ -236,6 +325,8 @@ public class PoisonDynamitePlugin extends Plugin
 	void reset()
 	{
 		attempts.clear();
+		defenceDrains.clear();
+		trackedNpc = null;
 		trackedNpcName = null;
 		trackedNpcId = -1;
 		sessionAttempts = 0;
@@ -244,6 +335,7 @@ public class PoisonDynamitePlugin extends Plugin
 
 	private void trackNpc(NPC npc)
 	{
+		trackedNpc = npc;
 		trackedNpcName = npc.getName() != null ? npc.getName() : "Unknown";
 		trackedNpcId = npc.getId();
 		npcStatsManager.getStats(trackedNpcName, trackedNpcId);

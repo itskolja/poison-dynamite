@@ -79,8 +79,17 @@ class PoisonDynamiteOverlay extends OverlayPanel
 			String style = styleResolver.getAttackStyle();
 			int effectiveLevel = styleResolver.getEffectiveAttackLevel(style);
 			int equipBonus = styleResolver.getEquipmentAttackBonus(style);
-			int npcDefLevel = npcStats.defenceLevel;
+			int defenceDrain = plugin.getTrackedDefenceDrain();
+			int npcDefLevel = Math.max(0, npcStats.defenceLevel - defenceDrain);
 			int npcStyleDef = npcStats.getDefenceForStyle(style);
+
+			panelComponent.getChildren().add(LineComponent.builder()
+				.left("Def lvl:")
+				.right(defenceDrain > 0
+					? npcDefLevel + " / " + npcStats.defenceLevel
+					: String.valueOf(npcDefLevel))
+				.rightColor(defenceDrain > 0 ? COLOR_HIGH : Color.WHITE)
+				.build());
 
 			double hitChance = HitChanceCalculator.calculate(
 				effectiveLevel, equipBonus, npcDefLevel, npcStyleDef);
