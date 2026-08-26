@@ -25,6 +25,28 @@ class PoisonAttempt
 		this.npc = npc;
 	}
 
+	/**
+	 * A second dynamite click on the same NPC. Mid-countdown it is usually just a
+	 * check click, so the running poison timer is kept. While the previous throw is
+	 * still in flight — or was cancelled — this click is the one that matters, so
+	 * the detonation window restarts rather than expiring on the old click's clock
+	 * and dropping the incoming splat.
+	 *
+	 * @return true if the existing attempt absorbed this click
+	 */
+	boolean absorbReclick()
+	{
+		if (isResolved())
+		{
+			return false;
+		}
+		if (awaitingDetonationHit)
+		{
+			ticksAwaitingDetonation = 0;
+		}
+		return true;
+	}
+
 	boolean isCountingDown()
 	{
 		return remainingTicks >= 0;

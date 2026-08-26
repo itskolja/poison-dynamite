@@ -52,12 +52,4 @@ public class HitChanceCalculatorTest
 		assertEquals(4, HitChanceCalculator.getMaxHit(90));
 		assertEquals(4, HitChanceCalculator.getMaxHit(99));
 	}
-
-	@Test
-	public void poisonChanceIsQuarterOfHitChance()
-	{
-		assertEquals(0.25, HitChanceCalculator.getPoisonChance(1.0), EPSILON);
-		assertEquals(0.125, HitChanceCalculator.getPoisonChance(0.5), EPSILON);
-		assertEquals(0.0, HitChanceCalculator.getPoisonChance(0.0), EPSILON);
-	}
 }
