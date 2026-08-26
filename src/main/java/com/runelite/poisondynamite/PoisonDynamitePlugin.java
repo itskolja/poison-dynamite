@@ -9,7 +9,9 @@ import java.util.Map;
 import javax.inject.Inject;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Actor;
 import net.runelite.api.Client;
+import net.runelite.api.Hitsplat;
 import net.runelite.api.HitsplatID;
 import net.runelite.api.InventoryID;
 import net.runelite.api.ItemContainer;
@@ -26,6 +28,7 @@ import net.runelite.api.gameval.ItemID;
 import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.NPCManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.specialcounter.SpecialCounterUpdate;
@@ -66,7 +69,13 @@ public class PoisonDynamitePlugin extends Plugin
 	@Inject
 	private NpcStatsManager npcStatsManager;
 
+	@Inject
+	private NPCManager npcManager;
+
 	private final Map<NPC, PoisonAttempt> attempts = new HashMap<>();
+
+	// poison ticking on NPCs we have poisoned, kept until it wears off or they die
+	private final Map<NPC, NpcPoison> poisons = new HashMap<>();
 
 	// cumulative defence drained by special attacks, per NPC instance
 	private final Map<NPC, Integer> defenceDrains = new HashMap<>();
@@ -144,21 +153,27 @@ public class PoisonDynamitePlugin extends Plugin
 	@Subscribe
 	public void onHitsplatApplied(HitsplatApplied event)
 	{
-		PoisonAttempt attempt = attempts.get(event.getActor());
+		Actor actor = event.getActor();
+		Hitsplat hitsplat = event.getHitsplat();
+		int amount = hitsplat.getAmount();
+		PoisonAttempt attempt = attempts.get(actor);
+
+		if (hitsplat.getHitsplatType() == HitsplatID.POISON)
+		{
+			trackPoisonHit(actor, attempt, amount);
+		}
+
 		if (attempt == null || attempt.isResolved())
 		{
 			return;
 		}
-
-		var hitsplat = event.getHitsplat();
-		int amount = hitsplat.getAmount();
 
 		if (hitsplat.getHitsplatType() == HitsplatID.POISON)
 		{
 			log.debug("Poison proc on {}! Damage: {}", attempt.npc.getName(), amount);
 			attempt.resolve(true);
 			sessionProcs++;
-			if (config.notifyOnProc())
+				if (config.notifyOnProc())
 			{
 				notifier.notify("Poison proc on " + attempt.npc.getName());
 			}
@@ -174,6 +189,12 @@ public class PoisonDynamitePlugin extends Plugin
 				attempt.detonationMiss = true;
 				attempt.resolve(false);
 			}
+			else if (isPoisonImmune(attempt.npc))
+			{
+				log.debug("Dynamite hit on {} for {}, but it is immune to poison",
+					attempt.npc.getName(), amount);
+				attempt.resolve(false);
+			}
 			else
 			{
 				attempt.startCountdown();
@@ -182,9 +203,40 @@ public class PoisonDynamitePlugin extends Plugin
 		}
 	}
 
+	/**
+	 * Feed a poison hitsplat into the model for an NPC we poisoned. The first
+	 * splat of an attempt starts the track; later splats keep it anchored.
+	 */
+	private void trackPoisonHit(Actor actor, PoisonAttempt attempt, int amount)
+	{
+		if (!(actor instanceof NPC))
+		{
+			return;
+		}
+
+		NPC npc = (NPC) actor;
+		NpcPoison poison = poisons.get(npc);
+		if (poison == null)
+		{
+			if (attempt == null || attempt.isResolved())
+			{
+				// not a poison we applied
+				return;
+			}
+			poison = new NpcPoison();
+			poisons.put(npc, poison);
+		}
+
+		poison.onPoisonHit(amount, Instant.now());
+		log.debug("Poison on {}: {} damage, {} hits left ({} damage)", npc.getName(), amount,
+			poison.getRemainingHits(), poison.getRemainingDamage());
+	}
+
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		updatePoisons();
+
 		Iterator<PoisonAttempt> it = attempts.values().iterator();
 		while (it.hasNext())
 		{
@@ -205,6 +257,12 @@ public class PoisonDynamitePlugin extends Plugin
 					it.remove();
 				}
 			}
+			else if (isPoisonImmune(attempt.npc))
+			{
+				// wiki immunity data can land after the countdown has started
+				log.debug("{} is immune to poison, abandoning countdown", attempt.npc.getName());
+				attempt.resolve(false);
+			}
 			else if (--attempt.remainingTicks <= 0)
 			{
 				log.debug("Poison timer expired on {}", attempt.npc.getName());
@@ -213,10 +271,44 @@ public class PoisonDynamitePlugin extends Plugin
 		}
 	}
 
+	/**
+	 * Refresh the hitpoints estimate from the health bar while it is visible and
+	 * drop poisons that have worn off.
+	 */
+	private void updatePoisons()
+	{
+		Iterator<Map.Entry<NPC, NpcPoison>> it = poisons.entrySet().iterator();
+		while (it.hasNext())
+		{
+			Map.Entry<NPC, NpcPoison> entry = it.next();
+			NpcPoison poison = entry.getValue();
+			if (!poison.isActive())
+			{
+				log.debug("Poison wore off on {}", entry.getKey().getName());
+				it.remove();
+				continue;
+			}
+
+			NPC npc = entry.getKey();
+			Integer maxHealth = npcManager.getHealth(npc.getId());
+			if (maxHealth != null)
+			{
+				poison.updateHealth(npc.getHealthRatio(), npc.getHealthScale(), maxHealth);
+			}
+		}
+	}
+
+	private boolean isPoisonImmune(NPC npc)
+	{
+		NpcStatsManager.NpcDefenceStats stats = npcStatsManager.getStats(npc.getName(), npc.getId());
+		return stats != null && stats.isPoisonImmune();
+	}
+
 	@Subscribe
 	public void onNpcDespawned(NpcDespawned event)
 	{
 		attempts.remove(event.getNpc());
+		poisons.remove(event.getNpc());
 		defenceDrains.remove(event.getNpc());
 		if (event.getNpc() == trackedNpc)
 		{
@@ -289,6 +381,8 @@ public class PoisonDynamitePlugin extends Plugin
 	@Subscribe
 	public void onActorDeath(ActorDeath event)
 	{
+		poisons.remove(event.getActor());
+
 		PoisonAttempt attempt = attempts.get(event.getActor());
 		if (attempt != null && !attempt.isResolved())
 		{
@@ -299,6 +393,11 @@ public class PoisonDynamitePlugin extends Plugin
 	Iterable<PoisonAttempt> getAttempts()
 	{
 		return attempts.values();
+	}
+
+	NpcPoison getTrackedPoison()
+	{
+		return trackedNpc == null ? null : poisons.get(trackedNpc);
 	}
 
 	int getTrackedDefenceDrain()
@@ -325,6 +424,7 @@ public class PoisonDynamitePlugin extends Plugin
 	void reset()
 	{
 		attempts.clear();
+		poisons.clear();
 		defenceDrains.clear();
 		trackedNpc = null;
 		trackedNpcName = null;

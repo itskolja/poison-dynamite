@@ -39,9 +39,4 @@ final class HitChanceCalculator
 		}
 		return 2;
 	}
-
-	static double getPoisonChance(double hitChance)
-	{
-		return hitChance * 0.25;
-	}
 }
