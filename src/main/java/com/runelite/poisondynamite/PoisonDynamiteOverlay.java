@@ -156,11 +156,6 @@ class PoisonDynamiteOverlay extends OverlayPanel
 				.build());
 		}
 
-		lines.add(LineComponent.builder()
-			.left("Max hit:")
-			.right(String.valueOf(HitChanceCalculator.getMaxHit(plugin.getFiremakingLevel())))
-			.build());
-
 		return lines;
 	}
 

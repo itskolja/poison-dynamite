@@ -17,7 +17,6 @@ Earlier demo: [hit chance and proc timer](https://youtu.be/IR9TIbziBSA)
 - **Session stats** — poison procs vs attempts for the current session
 - **Supplies** — remaining Dynamite(p) count with a low-supply warning
 - **Notifications** — optional system notification when the poison procs
-- **Max hit display** — shows your max hit based on Firemaking level
 
 NPC defence stats are fetched from the OSRS Wiki (by name, falling back to NPC ID); failed lookups are shown as "Unavailable" and retried automatically.
 
@@ -28,8 +27,8 @@ Settings are grouped into sections in the plugin's config panel.
 | Section | Setting | Description | Default |
 |---------|---------|-------------|---------|
 | Overlays | NPC countdown ring | Countdown ring above poisoned NPCs | On |
-| Overlays | Info panel | Info panel with target, hit chance and max hit | On |
-| Info panel | Target stats | Target's defence level, hit chance, poison immunity and your max hit | On |
+| Overlays | Info panel | Info panel with target and hit chance | On |
+| Info panel | Target stats | Target's defence level, hit chance and poison immunity | On |
 | Info panel | Poison tracker | Remaining poison damage, time until it wears off and time until it kills the target | On |
 | Info panel | Dynamite count | Remaining Dynamite(p) in the info panel | On |
 | Info panel | Session stats | Poison procs vs attempts this session | On |

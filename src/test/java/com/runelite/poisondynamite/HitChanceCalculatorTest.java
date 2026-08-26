@@ -41,15 +41,4 @@ public class HitChanceCalculatorTest
 		// no prayer, no stance
 		assertEquals(107, HitChanceCalculator.getEffectiveLevel(99, 1.0, 0));
 	}
-
-	@Test
-	public void maxHitScalesWithFiremaking()
-	{
-		assertEquals(2, HitChanceCalculator.getMaxHit(1));
-		assertEquals(2, HitChanceCalculator.getMaxHit(69));
-		assertEquals(3, HitChanceCalculator.getMaxHit(70));
-		assertEquals(3, HitChanceCalculator.getMaxHit(89));
-		assertEquals(4, HitChanceCalculator.getMaxHit(90));
-		assertEquals(4, HitChanceCalculator.getMaxHit(99));
-	}
 }
