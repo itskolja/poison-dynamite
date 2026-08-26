@@ -137,10 +137,8 @@ public class PoisonDynamitePlugin extends Plugin
 
 		trackNpc(npc);
 
-		// re-using dynamite mid-countdown is usually just a check click;
-		// keep the running timer instead of resetting it
 		PoisonAttempt existing = attempts.get(npc);
-		if (existing != null && !existing.isResolved())
+		if (existing != null && existing.absorbReclick())
 		{
 			return;
 		}
