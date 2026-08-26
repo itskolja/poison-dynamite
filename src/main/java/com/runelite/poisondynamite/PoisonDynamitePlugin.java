@@ -17,7 +17,6 @@ import net.runelite.api.InventoryID;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.MenuAction;
 import net.runelite.api.NPC;
-import net.runelite.api.Skill;
 import net.runelite.api.WorldView;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.GameTick;
@@ -407,11 +406,6 @@ public class PoisonDynamitePlugin extends Plugin
 	{
 		ItemContainer inventory = client.getItemContainer(InventoryID.INVENTORY);
 		return inventory == null ? 0 : inventory.count(ItemID.LOVAKENGJ_DYNAMITE_POISON);
-	}
-
-	int getFiremakingLevel()
-	{
-		return client.getBoostedSkillLevel(Skill.FIREMAKING);
 	}
 
 	NpcStatsManager getNpcStatsManager()

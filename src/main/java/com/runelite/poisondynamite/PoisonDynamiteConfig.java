@@ -46,7 +46,7 @@ public interface PoisonDynamiteConfig extends Config
 	@ConfigItem(
 		keyName = "showInfoPanel",
 		name = "Info panel",
-		description = "Show the info panel with target, hit chance and max hit.",
+		description = "Show the info panel with target and hit chance.",
 		position = 2,
 		section = overlaysSection
 	)
@@ -58,7 +58,7 @@ public interface PoisonDynamiteConfig extends Config
 	@ConfigItem(
 		keyName = "showTargetStats",
 		name = "Target stats",
-		description = "Show the target's defence level, hit chance, poison immunity and your max hit.",
+		description = "Show the target's defence level, hit chance and poison immunity.",
 		position = 1,
 		section = infoPanelSection
 	)

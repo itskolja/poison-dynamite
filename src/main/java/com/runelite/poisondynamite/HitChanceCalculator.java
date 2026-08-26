@@ -26,17 +26,4 @@ final class HitChanceCalculator
 	{
 		return (int) Math.floor(visibleLevel * prayerMult) + stanceBonus + 8;
 	}
-
-	static int getMaxHit(int firemakingLevel)
-	{
-		if (firemakingLevel >= 90)
-		{
-			return 4;
-		}
-		else if (firemakingLevel >= 70)
-		{
-			return 3;
-		}
-		return 2;
-	}
 }
